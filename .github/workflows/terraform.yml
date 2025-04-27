@@ -68,7 +68,7 @@ jobs:
 
             </details>
 
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ env.tf_actions_working_dir }}\`, Workflow: \`${{ github.workflow }}\`*`;
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`terraform/live\`, Workflow: \`${{ github.workflow }}\`*`;
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -76,3 +76,38 @@ jobs:
               repo: context.repo.repo,
               body: output
             })
+
+      - name: Terraform Apply
+        if: github.event_name == 'push'
+        id: apply
+        run: terraform apply -auto-approve
+        continue-on-error: false
+
+      - name: E2E Test
+        if: github.event_name == 'push'
+        id: e2e-test
+        run: |
+          kubectl get pods -n default
+          kubectl get pods -n default
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+  
+      - name: Run E2E Test Script
+        run: |
+          python e2e/test_load_balancing.py --url=http://localhost:8081 --requests=20 --delay=1.0
+
+      - name: Verify Load Balancing Output
+        run: |
+          # Optionally, check if the Python script output is as expected
+          # Example: Grep for expected message in logs
+          echo "Verifying load balancing test results..."
+          python e2e/test_load_balancing.py --url=http://localhost:80 --requests=20 --delay=1.0 | tee result.log
+          if grep -q "Load balancing appears to be working!" result.log; then
+            echo "Load balancing is working correctly."
+          else
+            echo "Load balancing test failed."
+            exit 1
+          fi

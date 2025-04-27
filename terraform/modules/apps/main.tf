@@ -8,7 +8,7 @@ resource "kubernetes_deployment" "app" {
 
   spec {
     replicas = var.replicas
-    
+
 
     selector {
       match_labels = {
@@ -26,8 +26,8 @@ resource "kubernetes_deployment" "app" {
       spec {
         service_account_name = var.rbac_enabled ? var.service_account_name : "default"
         container {
-          name  = var.name
-          image = var.image
+          name              = var.name
+          image             = var.image
           image_pull_policy = "Always"
 
           port {
@@ -35,7 +35,7 @@ resource "kubernetes_deployment" "app" {
           }
 
           env {
-            name  = "POD_NAME"
+            name = "POD_NAME"
             value_from {
               field_ref {
                 field_path = "metadata.name"
@@ -44,7 +44,7 @@ resource "kubernetes_deployment" "app" {
           }
 
           env {
-            name  = "POD_IP"
+            name = "POD_IP"
             value_from {
               field_ref {
                 field_path = "status.podIP"
@@ -102,7 +102,7 @@ resource "kubernetes_ingress_v1" "app" {
     rule {
       http {
         path {
-          path     = var.ingress_path
+          path      = var.ingress_path
           path_type = "Prefix"
 
           backend {
@@ -122,7 +122,7 @@ resource "kubernetes_ingress_v1" "app" {
 
 resource "kubernetes_service_account" "app" {
   count = var.rbac_enabled ? 1 : 0
-  
+
   metadata {
     name      = var.service_account_name
     namespace = var.namespace
@@ -131,7 +131,7 @@ resource "kubernetes_service_account" "app" {
 
 resource "kubernetes_role" "app" {
   count = var.rbac_enabled ? 1 : 0
-  
+
   metadata {
     name      = var.service_account_name
     namespace = var.namespace
@@ -152,7 +152,7 @@ resource "kubernetes_role" "app" {
 
 resource "kubernetes_role_binding" "app" {
   count = var.rbac_enabled ? 1 : 0
-  
+
   metadata {
     name      = var.service_account_name
     namespace = var.namespace
