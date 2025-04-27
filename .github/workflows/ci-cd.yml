@@ -21,8 +21,8 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build and push multi-architecture Docker image
         uses: docker/build-push-action@v3
@@ -30,7 +30,7 @@ jobs:
           context: ./apps/${{ matrix.app }}
           file: ./apps/${{ matrix.app }}/Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.app }}:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:latest
           platforms: linux/amd64,linux/arm64
-          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.app }}:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:latest
           cache-to: type=inline
