@@ -13,6 +13,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 jobs:
   detect-changes:
@@ -62,6 +63,8 @@ jobs:
     if: needs.detect-changes.outputs.changed_apps != '[]'
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -99,3 +102,25 @@ jobs:
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
           severity: CRITICAL
+
+      - name: Update terraform.tfvars with new image tag
+        run: |
+          app_name=${{ steps.appname.outputs.app_name }}
+          new_tag=${{ steps.tag_version.outputs.new_tag }}
+          tfvars_file="terraform/live/terraform.tfvars"
+
+          echo "Updating $app_name in $tfvars_file with tag $new_tag"
+
+          # Escape special characters for sed
+          escaped_app_name=$(printf '%s\n' "$app_name" | sed 's/[][\/.^$*]/\\&/g')
+
+          # Update the tag inside the app block
+          sed -i "0,/^\s*$escaped_app_name\s*=\s*{/{s/\(tag\s*=\s*\).*/\1\"$new_tag\"/}" "$tfvars_file"
+  
+      - name: Commit and push tfvars changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update ${{ steps.appname.outputs.app_name }} tag to ${{ steps.tag_version.outputs.new_tag }}"
+          file_pattern: terraform/live/terraform.tfvars
+          push_options: '--force'
+  
