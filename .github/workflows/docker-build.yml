@@ -28,13 +28,21 @@ jobs:
         with:
           files: apps/**
 
+      - id: format-output
+        run: |
+          if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
+            echo "changed_apps=${{ steps.changed-files.outputs.all_changed_files }}" >> $GITHUB_OUTPUT
+          else
+            echo "changed_apps=[]" >> $GITHUB_OUTPUT
+          fi
+
   build-and-push:
     name: Build and Push Apps
     needs: detect-changes
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: ${{ fromJson(needs.detect-changes.outputs.changed_apps) }}
+        app: ${{ fromJson(format('["{0}"]', needs.detect-changes.outputs.changed_apps)) }}
     if: needs.detect-changes.outputs.changed_apps != ''
     steps:
       - uses: actions/checkout@v4
