@@ -58,8 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: ${{ fromJson(format('["{0}"]', needs.detect-changes.outputs.changed_apps)) }}
-    if: needs.detect-changes.outputs.changed_apps != ''
+        app: ${{ fromJson(needs.detect-changes.outputs.changed_apps) }}
+    if: needs.detect-changes.outputs.changed_apps != '[]'
     steps:
       - uses: actions/checkout@v4
 
