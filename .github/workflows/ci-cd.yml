@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [pod-info-app]
+        app: [pod-info-app, pod-info-monitor]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
