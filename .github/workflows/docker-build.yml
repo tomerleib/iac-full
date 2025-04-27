@@ -32,9 +32,22 @@ jobs:
         run: |
           if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
             # Extract unique app directory names from changed files
-            app_dirs=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -o 'apps/[^/]*' | sort | uniq | sed 's|apps/||g' | tr '\n' ',' | sed 's/,$//')
-            # Format as JSON array
-            echo "changed_apps=[\"$(echo $app_dirs | sed 's/,/","/g')\"]" >> $GITHUB_OUTPUT
+            app_dirs=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -o 'apps/[^/]*' | sort | uniq | sed 's|apps/||g')
+            
+            # Convert to JSON array
+            json_array="["
+            first=true
+            while IFS= read -r app; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                json_array="$json_array,"
+              fi
+              json_array="$json_array\"$app\""
+            done <<< "$app_dirs"
+            json_array="$json_array]"
+            
+            echo "changed_apps=$json_array" >> $GITHUB_OUTPUT
           else
             echo "changed_apps=[]" >> $GITHUB_OUTPUT
           fi
