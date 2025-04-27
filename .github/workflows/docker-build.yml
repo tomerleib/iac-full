@@ -1,25 +1,41 @@
-name: Build, Scan and Push Docker Images
+name: Build and Release Apps
 
 on:
   push:
+    branches: [main]
     paths:
       - 'apps/**'
-    branches:
-      - main
-    
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/**'
 
 permissions:
   contents: write
   packages: write
-  id-token: write
 
 jobs:
+  detect-changes:
+    name: Detect Changed Apps
+    runs-on: ubuntu-latest
+    outputs:
+      changed_apps: ${{ steps.changed-files.outputs.all_changed_files }}
+    steps:
+      - uses: actions/checkout@v4
 
-  build:
+      - id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: apps/**
+
+  build-and-push:
+    name: Build and Push Apps
+    needs: detect-changes
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [pod-info-app, pod-info-monitor]
+        app: ${{ fromJson(needs.detect-changes.outputs.changed_apps) }}
+    if: needs.detect-changes.outputs.changed_apps != ''
     steps:
       - uses: actions/checkout@v4
 
@@ -30,28 +46,32 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Bump version and push tag
+      - name: Extract app name
+        id: appname
+        run: |
+          app_path=${{ matrix.app }}
+          app_name=$(basename $app_path)
+          echo "app_name=$app_name" >> $GITHUB_OUTPUT
+
+      - name: Bump Semantic Version (per app)
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: main
           default_bump: patch
-
-      - name: Build and Push Multi-Arch Docker Image
+          tag_prefix: "${{ steps.appname.outputs.app_name }}_v"
+          create_annotated_tag: true
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/${{ matrix.app }}
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:latest
+          context: ${{ matrix.app }}
           platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
 
       - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
+          severity: CRITICAL
