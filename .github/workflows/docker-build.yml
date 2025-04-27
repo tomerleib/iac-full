@@ -19,7 +19,7 @@ jobs:
     name: Detect Changed Apps
     runs-on: ubuntu-latest
     outputs:
-      changed_apps: ${{ steps.changed-files.outputs.all_changed_files }}
+      changed_apps: ${{ steps.format-output.outputs.changed_apps }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +31,10 @@ jobs:
       - id: format-output
         run: |
           if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
-            echo "changed_apps=${{ steps.changed-files.outputs.all_changed_files }}" >> $GITHUB_OUTPUT
+            # Extract unique app directory names from changed files
+            app_dirs=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -o 'apps/[^/]*' | sort | uniq | sed 's|apps/||g' | tr '\n' ',' | sed 's/,$//')
+            # Format as JSON array
+            echo "changed_apps=[\"$(echo $app_dirs | sed 's/,/","/g')\"]" >> $GITHUB_OUTPUT
           else
             echo "changed_apps=[]" >> $GITHUB_OUTPUT
           fi
