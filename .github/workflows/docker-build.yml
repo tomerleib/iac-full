@@ -73,7 +73,7 @@ jobs:
       - name: Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.app }}
+          context: ./apps/${{ steps.appname.outputs.app_name }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
