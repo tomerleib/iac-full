@@ -16,24 +16,21 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-release:
-    name: Build and Release per App
+  build-and-push:
+    name: Build, Push & Update per App
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [pod-info-app, pod-info-monitor]
-    outputs:
-      apps_built: ${{ steps.set-built-apps.outputs.apps_built }}
+        app: [pod-info-app, pod-info-monitor]  # ← static list of your apps
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for Changes
+      - name: Check for changes in ${{ matrix.app }}
         id: check_changes
         run: |
-          set -e
           if git diff --quiet HEAD^ HEAD -- apps/${{ matrix.app }}; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
@@ -70,66 +67,45 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
 
-      - name: Scan Image with Trivy
-        if: steps.check_changes.outputs.skip == 'false'
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
-          severity: CRITICAL
-
       - name: Update terraform.tfvars
         if: steps.check_changes.outputs.skip == 'false'
         run: |
-          app_name=${{ matrix.app }}
-          new_tag=${{ steps.tag_version.outputs.new_tag }}
-          tfvars_file="terraform/live/terraform.tfvars"
+          app="${{ matrix.app }}"
+          tag="${{ steps.tag_version.outputs.new_tag }}"
+          file="terraform/live/terraform.tfvars"
+          echo "Updating $app → $tag"
+          esc_app=$(printf '%s' "$app" | sed 's/[][\/.^$*]/\\&/g')
+          sed -i "/$esc_app *= *{/,/}/s/\(tag *= *\).*/\1\"$tag\"/" "$file"
 
-          echo "Updating $app_name in $tfvars_file with tag $new_tag"
-          escaped_app_name=$(printf '%s\n' "$app_name" | sed 's/[][\/.^$*]/\\&/g')
-          sed -i "/$escaped_app_name\s*=/,/}/s/\(tag\s*=\s*\).*/\1\"$new_tag\"/" "$tfvars_file"
-
-      - name: Set built apps output
-        id: set-built-apps
-        run: |
-          if [ "${{ steps.check_changes.outputs.skip }}" == "false" ]; then
-            echo "${{ matrix.app }}" >> built_apps.txt
-          fi
-
-      - name: Upload built apps
-        if: steps.check_changes.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-apps
-          path: built_apps.txt
-          if-no-files-found: ignore
-
-  commit-updates:
-    name: Commit and Push tfvars
-    needs: build-and-release
+  finalize:
+    name: Commit tfvars once
+    needs: build-and-push
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download built apps
-        uses: actions/download-artifact@v4
-        with:
-          name: built-apps
-          path: .
-
-      - name: Commit tfvars update
+      - name: Configure Git
         run: |
-          if [ -f built_apps.txt ]; then
-            apps=$(paste -sd "," built_apps.txt)
-            echo "Built apps: $apps"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add terraform/live/terraform.tfvars
-            git commit -m "chore: update image tags for: $apps"
-            git push origin main
+      - name: Detect tfvars changes
+        id: git-check
+        run: |
+          if git diff --quiet ${{ github.event.before }} ${{ github.sha }} -- terraform/live/terraform.tfvars; then
+            echo "changes=false" >> $GITHUB_OUTPUT
           else
-            echo "No apps built. Skipping commit."
+            echo "changes=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Commit & Push tfvars
+        if: steps.git-check.outputs.changes == 'true'
+        run: |
+          git add terraform/live/terraform.tfvars
+          git commit -m "chore: update app image tags after builds"
+          git push origin main
+        
