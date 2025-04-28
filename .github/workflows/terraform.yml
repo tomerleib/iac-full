@@ -103,8 +103,9 @@ jobs:
 
       - name: Verify Load Balancing Output
         if: github.event_name == 'pull_request'
+        working-directory: terraform/live
         run: |
-          python ../e2e/test_load_balancing.py --url=http://localhost:8081 --requests=20 --delay=1.0 | tee test_output.log
+          python e2e/load_balance_test.py --url=http://localhost:8081 --requests=20 --delay=1.0 | tee test_output.log
           if ! grep -q "Load balancing appears to be working!" test_output.log; then
             echo "Load balancing test failed"
             exit 1
