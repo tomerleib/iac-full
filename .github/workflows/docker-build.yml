@@ -17,31 +17,28 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build, Push and Update per App
+    name: Build and Release per App
     runs-on: ubuntu-latest
     strategy:
       matrix:
         app: [pod-info-app, pod-info-monitor]
+    outputs:
+      apps_built: ${{ steps.set-built-apps.outputs.apps_built }}
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 2
 
-      - name: Check if app has changes
+      - name: Check for Changes
         id: check_changes
         run: |
           set -e
           if git diff --quiet HEAD^ HEAD -- apps/${{ matrix.app }}; then
-            echo "No changes detected for ${{ matrix.app }}"
             echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Changes detected for ${{ matrix.app }}"
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Exit early if no changes
-        if: steps.check_changes.outputs.skip == 'true'
-        run: echo "Skipping build because no changes were detected."
 
       - name: Setup Docker
         if: steps.check_changes.outputs.skip == 'false'
@@ -80,7 +77,7 @@ jobs:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
           severity: CRITICAL
 
-      - name: Update terraform.tfvars with new tag
+      - name: Update terraform.tfvars
         if: steps.check_changes.outputs.skip == 'false'
         run: |
           app_name=${{ matrix.app }}
@@ -88,18 +85,51 @@ jobs:
           tfvars_file="terraform/live/terraform.tfvars"
 
           echo "Updating $app_name in $tfvars_file with tag $new_tag"
-
-          # Escape app name for sed
           escaped_app_name=$(printf '%s\n' "$app_name" | sed 's/[][\/.^$*]/\\&/g')
-
-          # Update the correct app block only
           sed -i "/$escaped_app_name\s*=/,/}/s/\(tag\s*=\s*\).*/\1\"$new_tag\"/" "$tfvars_file"
 
-      - name: Commit and push tfvars changes
-        if: steps.check_changes.outputs.skip == 'false'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: update ${{ matrix.app }} tag to ${{ steps.tag_version.outputs.new_tag }}"
-          file_pattern: terraform/live/terraform.tfvars
-          push_options: --force
+      - name: Set built apps output
+        id: set-built-apps
+        run: |
+          if [ "${{ steps.check_changes.outputs.skip }}" == "false" ]; then
+            echo "${{ matrix.app }}" >> built_apps.txt
+          fi
 
+      - name: Upload built apps
+        if: steps.check_changes.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-apps
+          path: built_apps.txt
+          if-no-files-found: ignore
+
+  commit-updates:
+    name: Commit and Push tfvars
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download built apps
+        uses: actions/download-artifact@v4
+        with:
+          name: built-apps
+          path: .
+
+      - name: Commit tfvars update
+        run: |
+          if [ -f built_apps.txt ]; then
+            apps=$(paste -sd "," built_apps.txt)
+            echo "Built apps: $apps"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add terraform/live/terraform.tfvars
+            git commit -m "chore: update image tags for: $apps"
+            git push origin main
+          else
+            echo "No apps built. Skipping commit."
+          fi
