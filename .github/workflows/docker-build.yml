@@ -148,16 +148,17 @@ jobs:
       - name: Detect tfvars changes
         id: git-check
         run: |
-          if git diff --quiet ${{ github.event.before }} ${{ github.sha }} -- terraform/live/terraform.tfvars; then
-            echo "changes=false" >> $GITHUB_OUTPUT
-          else
+          if git status --porcelain terraform/live/terraform.tfvars | grep .; then
             echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
           fi
-
+  
       - name: Commit & Push tfvars
         if: steps.git-check.outputs.changes == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5.1.0
         with:
           commit_message: "chore: update app image tags after builds"
           file_pattern: "terraform/live/terraform.tfvars"
+          push_options: "--force"
         
