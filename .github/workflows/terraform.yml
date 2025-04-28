@@ -87,12 +87,12 @@ jobs:
         run: terraform apply -auto-approve
         continue-on-error: true
 
-      - name: E2E Test
+      - name: Get Pods
         if: github.event_name == 'pull_request'
-        id: e2e-test
+        id: get_pods
         run: |
           kubectl get pods -n default
-          kubectl get pods -n default
+
           
       - name: Install dependencies
         if: github.event_name == 'pull_request'
