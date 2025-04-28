@@ -16,71 +16,46 @@ permissions:
   id-token: write
 
 jobs:
-  detect-changes:
-    name: Detect Changed Apps
-    runs-on: ubuntu-latest
-    outputs:
-      changed_apps: ${{ steps.format-output.outputs.changed_apps }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: changed-files
-        uses: tj-actions/changed-files@v44
-        with:
-          files: apps/**
-
-      - id: format-output
-        run: |
-          if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
-            # Extract unique app directory names from changed files
-            app_dirs=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | grep -o 'apps/[^/]*' | sort | uniq | sed 's|apps/||g')
-            
-            # Convert to JSON array
-            json_array="["
-            first=true
-            while IFS= read -r app; do
-              if [ "$first" = true ]; then
-                first=false
-              else
-                json_array="$json_array,"
-              fi
-              json_array="$json_array\"$app\""
-            done <<< "$app_dirs"
-            json_array="$json_array]"
-            
-            echo "changed_apps=$json_array" >> $GITHUB_OUTPUT
-          else
-            echo "changed_apps=[]" >> $GITHUB_OUTPUT
-          fi
-
-  build-and-push:
-    name: Build and Push Apps
-    needs: detect-changes
+  build-and-release:
+    name: Build, Push and Update per App
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: ${{ fromJson(needs.detect-changes.outputs.changed_apps) }}
-    if: needs.detect-changes.outputs.changed_apps != '[]'
+        app: [pod-info-app, pod-info-monitor]
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 2
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Check if app has changes
+        id: check_changes
+        run: |
+          set -e
+          if git diff --quiet HEAD^ HEAD -- apps/${{ matrix.app }}; then
+            echo "No changes detected for ${{ matrix.app }}"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected for ${{ matrix.app }}"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
-      - uses: docker/login-action@v3
+      - name: Exit early if no changes
+        if: steps.check_changes.outputs.skip == 'true'
+        run: echo "Skipping build because no changes were detected."
+
+      - name: Setup Docker
+        if: steps.check_changes.outputs.skip == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        if: steps.check_changes.outputs.skip == 'false'
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract app name
-        id: appname
-        run: |
-          app_path=${{ matrix.app }}
-          app_name=$(basename $app_path)
-          echo "app_name=$app_name" >> $GITHUB_OUTPUT
-
-      - name: Bump Semantic Version (per app)
+      - name: Bump Semantic Version
+        if: steps.check_changes.outputs.skip == 'false'
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.1
         with:
@@ -88,39 +63,43 @@ jobs:
           tag_prefix: "v"
           create_annotated_tag: true
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Build and Push Docker image
+
+      - name: Build and Push Docker Image
+        if: steps.check_changes.outputs.skip == 'false'
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/${{ steps.appname.outputs.app_name }}
+          context: ./apps/${{ matrix.app }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
 
       - name: Scan Image with Trivy
+        if: steps.check_changes.outputs.skip == 'false'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ steps.appname.outputs.app_name }}:${{ steps.tag_version.outputs.new_tag }}
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.tag_version.outputs.new_tag }}
           severity: CRITICAL
 
-      - name: Update terraform.tfvars with new image tag
+      - name: Update terraform.tfvars with new tag
+        if: steps.check_changes.outputs.skip == 'false'
         run: |
-          app_name=${{ steps.appname.outputs.app_name }}
+          app_name=${{ matrix.app }}
           new_tag=${{ steps.tag_version.outputs.new_tag }}
           tfvars_file="terraform/live/terraform.tfvars"
 
           echo "Updating $app_name in $tfvars_file with tag $new_tag"
 
-          # Escape special characters for sed
+          # Escape app name for sed
           escaped_app_name=$(printf '%s\n' "$app_name" | sed 's/[][\/.^$*]/\\&/g')
 
-          # Update the tag inside the app block
-          sed -i "0,/^\s*$escaped_app_name\s*=\s*{/{s/\(tag\s*=\s*\).*/\1\"$new_tag\"/}" "$tfvars_file"
-  
+          # Update the correct app block only
+          sed -i "/$escaped_app_name\s*=/,/}/s/\(tag\s*=\s*\).*/\1\"$new_tag\"/" "$tfvars_file"
+
       - name: Commit and push tfvars changes
+        if: steps.check_changes.outputs.skip == 'false'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update ${{ steps.appname.outputs.app_name }} tag to ${{ steps.tag_version.outputs.new_tag }}"
+          commit_message: "chore: update ${{ matrix.app }} tag to ${{ steps.tag_version.outputs.new_tag }}"
           file_pattern: terraform/live/terraform.tfvars
-          push_options: '--force'
-  
+          push_options: --force
+
