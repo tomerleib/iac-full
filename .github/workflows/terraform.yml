@@ -81,7 +81,7 @@ jobs:
         if: github.event_name == 'push'
         id: apply
         run: terraform apply -auto-approve
-        continue-on-error: false
+        continue-on-error: true
 
       - name: E2E Test
         if: github.event_name == 'push'

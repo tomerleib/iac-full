@@ -1,7 +1,7 @@
 apps = {
   pod-info-app = {
     image    = "tomerleib/pod-info-app"
-    tag      = "v0.0.1"
+    tag      = "latest"
     replicas = 2
   }
   pod-info-monitor = {
