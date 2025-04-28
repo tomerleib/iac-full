@@ -66,7 +66,6 @@ After deploying the infrastructure, you can access the applications through thei
    minikube addon enable ingress
    minikube tunnel
    http://localhost - pod-info-app
-   http://localhost/app_status - pod-info-monitor
    
    # If using k3d
    kubectl get svc pod-info-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}:{.spec.ports[0].port}'
@@ -76,6 +75,10 @@ After deploying the infrastructure, you can access the applications through thei
    ```bash
    # If using Minikube
    minikube service pod-info-monitor --url
+   # or
+   minikube addon enable ingress
+   minikube tunnel
+   http://localhost/app_status - pod-info-monitor
    
    # If using k3d
    kubectl get svc pod-info-monitor -o jsonpath='{.status.loadBalancer.ingress[0].ip}:{.spec.ports[0].port}'
