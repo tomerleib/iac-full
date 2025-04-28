@@ -19,7 +19,13 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: engineerd/setup-kind@v0.6.2 
+      - uses: AbsaOSS/k3d-action@v2
+        name: "Create Single Cluster"
+        with:
+          cluster-name: "test-cluster-1"
+          args: >-
+            -p "8081:80@loadbalancer"
+            --agents 1
       - uses: hashicorp/setup-terraform@v3
 
       - name: Terraform fmt
@@ -87,12 +93,12 @@ jobs:
         run: terraform apply -auto-approve
         continue-on-error: true
 
-      - name: E2E Test
+      - name: Get Pods
         if: github.event_name == 'pull_request'
-        id: e2e-test
+        id: get_pods
         run: |
           kubectl get pods -n default
-          kubectl get pods -n default
+
           
       - name: Install dependencies
         if: github.event_name == 'pull_request'
@@ -100,21 +106,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
   
-      - name: Run E2E Test Script
-        if: github.event_name == 'pull_request'
-        run: |
-          python e2e/test_load_balancing.py --url=http://localhost:8081 --requests=20 --delay=1.0
 
       - name: Verify Load Balancing Output
         if: github.event_name == 'pull_request'
+        working-directory: terraform/live
         run: |
-          # Optionally, check if the Python script output is as expected
-          # Example: Grep for expected message in logs
-          echo "Verifying load balancing test results..."
-          python e2e/test_load_balancing.py --url=http://localhost:80 --requests=20 --delay=1.0 | tee result.log
-          if grep -q "Load balancing appears to be working!" result.log; then
-            echo "Load balancing is working correctly."
-          else
-            echo "Load balancing test failed."
+          python e2e/load_balance_test.py --url=http://localhost:8081 --requests=20 --delay=1.0 | tee test_output.log
+          if ! grep -q "Load balancing appears to be working!" test_output.log; then
+            echo "Load balancing test failed"
             exit 1
           fi
+          echo "Load balancing test passed successfully!"
