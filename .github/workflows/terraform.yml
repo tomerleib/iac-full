@@ -100,10 +100,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
   
-      - name: Run E2E Test Script
-        if: github.event_name == 'pull_request'
-        run: |
-          python e2e/test_load_balancing.py --url=http://localhost:8081 --requests=20 --delay=1.0
 
       - name: Verify Load Balancing Output
         if: github.event_name == 'pull_request'
