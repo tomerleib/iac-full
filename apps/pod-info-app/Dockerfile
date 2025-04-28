@@ -1,17 +1,21 @@
-FROM python:3.9-alpine
+FROM --platform=$BUILDPLATFORM python:3.11-slim
 
-RUN adduser -D myuser
+RUN useradd -m -r appuser
 
 WORKDIR /app
 
-COPY . /app
-
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN chmod -R 755 /app
+COPY . .
 
-USER myuser
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
 EXPOSE 8080
 
 ENV FLASK_APP=app.py
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "app.py"]
