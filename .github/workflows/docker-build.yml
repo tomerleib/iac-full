@@ -18,31 +18,57 @@ concurrency:
 permissions:
   contents: write
   packages: write
-  id-token: write
 
 jobs:
-  build-and-push:
-    name: Build, Push & Update per App
+  # ─── 1) Figure out which apps actually changed ───────────────────────────────
+  detect-changes:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        app: [pod-info-app, pod-info-monitor]
-
+    outputs:
+      changed_apps: ${{ steps.format.outputs.changed_apps }}
     steps:
-      - uses: actions/checkout@v4.1.1
+      - name: Checkout
+        uses: actions/checkout@v4.5.0
         with:
           fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for changes in ${{ matrix.app }}
+      - id: format
+        run: |
+          files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} -- apps/)
+          # extract unique app folder names
+          apps=$(printf "%s\n" $files \
+            | grep -oE '^apps/[^/]+' \
+            | cut -d/ -f2 \
+            | sort -u)
+          # build JSON array
+          json="[]"
+          for app in $apps; do
+            json=$(echo $json | jq --arg a "$app" '. + [$a]')
+          done
+          echo "changed_apps=$json" >> $GITHUB_OUTPUT
+
+  # ─── 2) Build, tag & push each changed app in parallel ──────────────────────
+  build-and-push:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changed_apps != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.detect-changes.outputs.changed_apps) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip if no changes in this app
         id: check_changes
         run: |
-          if git diff --quiet ${{ github.event.before }} ${{ github.sha }} -- apps/${{ matrix.app }}; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
+          git diff --quiet ${{ github.event.before }} ${{ github.sha }} -- apps/${{ matrix.app }} \
+            && echo "skip=true" >> $GITHUB_OUTPUT \
+            || echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Setup Docker
         if: steps.check_changes.outputs.skip == 'false'
@@ -120,22 +146,18 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Update terraform.tfvars
+      - name: Scan Image with Trivy
         if: steps.check_changes.outputs.skip == 'false'
-        run: |
-          app="${{ matrix.app }}"
-          tag="${{ steps.set_new_tag.outputs.new_tag }}"
-          file="terraform/live/terraform.tfvars"
-          esc_app=$(printf '%s' "$app" | sed 's/[][\/.^$*]/\\&/g')
-          sed -i "/$esc_app *= *{/,/}/s/\(tag *= *\).*/\1\"$tag\"/" "$file"
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.set_new_tag.outputs.new_tag }}
+          severity: CRITICAL
 
 
   finalize:
-    name: Commit tfvars once
-    needs: build-and-push
+    needs: [detect-changes, build-and-push]
+    if: github.event_name == 'push' && needs.detect-changes.outputs.changed_apps != '[]'
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.1
@@ -145,6 +167,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Patch terraform.tfvars for all changed apps
+        run: |
+          tfvars="terraform/live/terraform.tfvars"
+          apps=$(jq -r '.[]' <<< '${{ needs.detect-changes.outputs.changed_apps }}')
+          for app in $apps; do
+            # pick up the latest per-app tag from the remote
+            tag=$(git ls-remote --tags origin "refs/tags/${app}_v*" \
+                  | sed 's|.*/||' | sort -V | tail -n1)
+            echo "→ $app → $tag"
+            esc=$(printf '%s' "$app" | sed 's/[][\/.^$*]/\\&/g')
+            sed -i "/$esc *= *{/,/}/s/\(tag *= *\).*/\1\"$tag\"/" "$tfvars"
+          done
+
       - name: Detect tfvars changes
         id: git-check
         run: |
@@ -153,12 +188,10 @@ jobs:
           else
             echo "changes=false" >> $GITHUB_OUTPUT
           fi
-  
+
       - name: Commit & Push tfvars
         if: steps.git-check.outputs.changes == 'true'
-        uses: stefanzweifel/git-auto-commit-action@v5.1.0
-        with:
-          commit_message: "chore: update app image tags after builds"
-          file_pattern: "terraform/live/terraform.tfvars"
-          push_options: "--force"
-        
+        run: |
+          git add terraform/live/terraform.tfvars
+          git commit -m "chore: update app image tags after builds"
+          git push origin main
