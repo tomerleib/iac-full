@@ -20,8 +20,9 @@ jobs:
     name: Build, Push & Update per App
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        app: [pod-info-app, pod-info-monitor]  # ← static list of your apps
+        app: [pod-info-app, pod-info-monitor]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,9 +85,8 @@ jobs:
     if: github.event_name == 'push'
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4.5.0
 
       - name: Configure Git
         run: |
@@ -104,8 +104,8 @@ jobs:
 
       - name: Commit & Push tfvars
         if: steps.git-check.outputs.changes == 'true'
-        run: |
-          git add terraform/live/terraform.tfvars
-          git commit -m "chore: update app image tags after builds"
-          git push origin main
+        uses: stefanzweifel/git-auto-commit-action@v5.1.0
+        with:
+          commit_message: "chore: update app image tags after builds"
+          file_pattern: "terraform/live/terraform.tfvars"
         
