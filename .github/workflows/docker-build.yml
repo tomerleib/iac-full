@@ -98,26 +98,21 @@ jobs:
           esc=$(printf '%s' "$app" | sed 's/[][\/.^$*]/\\&/g')
           sed -i "/$esc *= *{/,/}/s/\(tag *= *\).*/\1\"$tag\"/" "$file"
 
-      - name: Commit tfvars bump
-        if: steps.check_changes.outputs.skip == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b bump-${{ matrix.app }}-${{ steps.tag_version.outputs.new_tag }}
-          git add terraform/live/terraform.tfvars
-          git commit -m "chore: bump ${{ matrix.app }} image tag to ${{ steps.tag_version.outputs.new_tag }}"
-
-      - name: Open PR for tfvars bump
+      - name: Create PR for tfvars bump
         if: steps.check_changes.outputs.skip == 'false'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # The branch name to create/update
           branch: bump-${{ matrix.app }}-${{ steps.tag_version.outputs.new_tag }}
           base: main
+          # This message is used both for the commit and the PR title
           commit-message: "chore: bump ${{ matrix.app }} image tag to ${{ steps.tag_version.outputs.new_tag }}"
           title: "chore: bump ${{ matrix.app }} image tag to ${{ steps.tag_version.outputs.new_tag }}"
           body: |
-            This PR was opened automatically by CI to update the image tag for **${{ matrix.app }}**  
-            New tag: `${{ steps.tag_version.outputs.new_tag }}`  
+            This PR was created by CI to update the image tag for **${{ matrix.app }}**  
+            New tag: `${{ steps.tag_version.outputs.new_tag }}`
           labels: automated-pr, tfvars
           delete-branch: false
+          add-paths: | 
+            terraform/live/terraform.tfvars
